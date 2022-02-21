@@ -346,6 +346,17 @@ static void *handle_mpv_events() {
     bool mpv_paused = 0;
     time_t start_time = time(NULL);
 
+    const int MPV_OBSERVE_IDLE = 1;
+    const int MPV_OBSERVE_PAUSE = 2;
+    mpv_observe_property(mpv, MPV_OBSERVE_IDLE, "idle-active", MPV_FORMAT_NONE);
+    mpv_observe_property(mpv, MPV_OBSERVE_PAUSE, "pause", MPV_FORMAT_FLAG);
+
+    // Clear all events
+    mpv_event* event = mpv_wait_event(mpv, 1);
+    while (event->event_id != MPV_EVENT_NONE){
+        event = mpv_wait_event(mpv, 1);
+    }
+
     while (!halt_info.kill_render_loop) {
         if (SLIDESHOW_TIME) {
             if ((time(NULL) - start_time) >= SLIDESHOW_TIME) {
@@ -355,17 +366,23 @@ static void *handle_mpv_events() {
         }
 
         mpv_event* event = mpv_wait_event(mpv, 0);
-        if (event->event_id == MPV_EVENT_SHUTDOWN || event->event_id == MPV_EVENT_IDLE)
+
+        if (event->event_id == MPV_EVENT_SHUTDOWN)
             exit_mpvpaper(0);
-        else if (event->event_id == MPV_EVENT_PAUSE) {
-            mpv_paused = 1;
-            // User paused
-            if (!halt_info.is_paused)
-                halt_info.is_paused += 1;
-        }
-        else if (event->event_id == MPV_EVENT_UNPAUSE) {
-            mpv_paused = 0;
-            halt_info.is_paused = 0;
+        else if (event->event_id == MPV_EVENT_PROPERTY_CHANGE) {
+            if (event->reply_userdata == MPV_OBSERVE_IDLE) {
+                exit_mpvpaper(0);
+            }
+            if (event->reply_userdata == MPV_OBSERVE_PAUSE) {
+                mpv_get_property(mpv, "pause", MPV_FORMAT_FLAG, &mpv_paused);
+                if (mpv_paused) {
+                    // User paused
+                    if (!halt_info.is_paused)
+                        halt_info.is_paused += 1;
+                } else {
+                    halt_info.is_paused = 0;
+                }
+            }
         }
 
         if (!halt_info.is_paused && mpv_paused) {
@@ -374,6 +391,10 @@ static void *handle_mpv_events() {
 
         pthread_usleep(10000);
     }
+
+    mpv_unobserve_property(mpv, MPV_OBSERVE_IDLE);
+    mpv_unobserve_property(mpv, MPV_OBSERVE_PAUSE);
+
     pthread_exit(NULL);
 }
 
